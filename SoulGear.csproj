@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>SoulGear</RootNamespace>
+    <AssemblyName>SoulGear</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Reference the Vintage Story DLLs (uses APPDATA env var for portability) -->
+    <Reference Include="VintagestoryAPI">
+      <HintPath>$(APPDATA)\Vintagestory\VintagestoryAPI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="VintagestoryLib">
+      <HintPath>$(APPDATA)\Vintagestory\VintagestoryLib.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="VSSurvivalMod">
+      <HintPath>$(APPDATA)\Vintagestory\Mods\VSSurvivalMod.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(APPDATA)\Vintagestory\Lib\Newtonsoft.Json.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(APPDATA)\Vintagestory\Lib\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="Package" AfterTargets="PostBuildEvent">
+    <ItemGroup>
+      <PackageFiles Include="$(TargetPath)" />
+      <PackageFiles Include="modinfo.json" />
+    </ItemGroup>
+    <!-- Copy DLL and modinfo.json -->
+    <Copy SourceFiles="@(PackageFiles)" DestinationFolder="$(ProjectDir)bin\$(Configuration)\$(TargetFramework)\mod\" />
+    <!-- Copy assets folder recursively -->
+    <ItemGroup>
+      <AssetFiles Include="$(ProjectDir)assets\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(AssetFiles)" DestinationFiles="@(AssetFiles->'$(ProjectDir)bin\$(Configuration)\$(TargetFramework)\mod\assets\%(RecursiveDir)%(Filename)%(Extension)')" />
+    <!-- Create zip -->
+    <ZipDirectory SourceDirectory="$(ProjectDir)bin\$(Configuration)\$(TargetFramework)\mod\" DestinationFile="$(ProjectDir)bin\$(Configuration)\$(TargetFramework)\SoulGear.zip" Overwrite="true" />
+    <!-- Auto-deploy to Vintagestory Mods folder -->
+    <Copy SourceFiles="$(ProjectDir)bin\$(Configuration)\$(TargetFramework)\SoulGear.zip" DestinationFolder="$(APPDATA)\VintagestoryData\Mods\" />
+    <Message Importance="high" Text="Deployed SoulGear.zip to $(APPDATA)\VintagestoryData\Mods\" />
+  </Target>
+
+</Project>

@@ -1,0 +1,12 @@
+{
+  "type": "code",
+  "modid": "soulgear",
+  "name": "Soul Gear",
+  "authors": ["maaro"],
+  "description": "Adds the Soul Gear - a craftable item that grants one charge of keep inventory on death. Use it like a temporal gear, but instead of setting your spawn point, it protects your inventory for your next death.",
+  "version": "1.0.0",
+  "dependencies": {
+    "game": "1.19.0",
+    "survival": "1.19.0"
+  }
+}

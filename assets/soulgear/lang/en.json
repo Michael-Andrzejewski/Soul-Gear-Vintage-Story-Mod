@@ -1,0 +1,7 @@
+{
+  "item-soulgear": "Soul Gear",
+  "itemdesc-soulgear": "Use while aiming at a block to bind your soul. On your next death, your inventory will be preserved. Does not change your spawn point.",
+  "message-soul-protection-gained": "Your soul has been bound. Your inventory will be preserved on your next death.",
+  "message-soul-protection-used": "The Soul Gear's protection is saving your inventory...",
+  "message-inventory-restored": "Your inventory has been restored by the Soul Gear's protection!"
+}

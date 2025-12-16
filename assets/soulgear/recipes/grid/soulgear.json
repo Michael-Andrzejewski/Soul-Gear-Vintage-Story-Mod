@@ -1,0 +1,16 @@
+{
+  "ingredientPattern": "_G_,G_G,_G_",
+  "width": 3,
+  "height": 3,
+  "ingredients": {
+    "G": {
+      "type": "item",
+      "code": "game:gear-rusty"
+    }
+  },
+  "output": {
+    "type": "item",
+    "code": "soulgear:soulgear",
+    "quantity": 1
+  }
+}
