@@ -11,9 +11,9 @@
   },
   "shape": { "base": "game:item/gear-temporal" },
   "textures": {
-    "metal": { "base": "game:item/resource/metal/nugget-iron" },
-    "metal2": { "base": "game:item/resource/metal/nugget-iron" },
-    "gem": { "base": "game:block/stone/polishedrock/peridotite" }
+    "metal": { "base": "soulgear:item/soulgear-purple" },
+    "metal2": { "base": "soulgear:item/soulgear-purple" },
+    "gem": { "base": "soulgear:item/soulgear-purple-gem" }
   },
   "creativeinventory": {
     "general": ["*"],

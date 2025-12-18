@@ -6,7 +6,12 @@
       "WebFetch(domain:wiki.vintagestory.at)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:apidocs.vintagestory.at)",
-      "Bash(dotnet build:*)"
+      "Bash(dotnet build:*)",
+      "Bash(mkdir:*)",
+      "Bash(curl:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "WebFetch(domain:mods.vintagestory.at)"
     ]
   }
 }
