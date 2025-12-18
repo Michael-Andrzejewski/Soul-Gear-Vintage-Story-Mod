@@ -11,7 +11,8 @@
       "Bash(curl:*)",
       "Bash(python:*)",
       "Bash(pip install:*)",
-      "WebFetch(domain:mods.vintagestory.at)"
+      "WebFetch(domain:mods.vintagestory.at)",
+      "Bash(unzip:*)"
     ]
   }
 }
