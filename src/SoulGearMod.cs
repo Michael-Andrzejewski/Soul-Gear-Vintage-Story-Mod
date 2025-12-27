@@ -47,7 +47,36 @@ namespace SoulGear
             // Hook into player respawn event
             api.Event.PlayerRespawn += OnPlayerRespawn;
 
+            // Register a periodic check for players who were revived without respawning
+            // (e.g., healed by poultice/bandage while downed)
+            api.Event.RegisterGameTickListener(OnGameTick, 1000); // Check every second
+
             api.Logger.Notification("[SoulGear] Mod loaded with Harmony patches applied");
+        }
+
+        /// <summary>
+        /// Called every second to check for players who were revived without respawning
+        /// (e.g., healed by a teammate's poultice/bandage while downed).
+        /// </summary>
+        private void OnGameTick(float dt)
+        {
+            if (SavedInventories.Count == 0) return;
+
+            // Create a copy of keys to avoid modifying collection during iteration
+            var playerUids = new List<string>(SavedInventories.Keys);
+
+            foreach (var playerUid in playerUids)
+            {
+                var player = ServerApi.World.PlayerByUid(playerUid) as IServerPlayer;
+                if (player?.Entity == null) continue;
+
+                // Check if the player is alive (was revived without respawning)
+                if (player.Entity.Alive)
+                {
+                    ServerApi.Logger.Debug($"[SoulGear] Detected revived player {player.PlayerName} with pending inventory - restoring");
+                    RestorePlayerInventory(player);
+                }
+            }
         }
 
         /// <summary>
