@@ -473,8 +473,10 @@ namespace SoulGear
                     {
                         using (var writer = new BinaryWriter(ms))
                         {
-                            // Write version for future compatibility
-                            writer.Write((byte)1);
+                            // Write magic bytes and version for future compatibility
+                            writer.Write((byte)0x53); // 'S'
+                            writer.Write((byte)0x47); // 'G'
+                            writer.Write((byte)1);    // Version 1
 
                             // Write number of players
                             writer.Write(snapshot.Length);
@@ -547,22 +549,24 @@ namespace SoulGear
                 {
                     using (var reader = new BinaryReader(ms))
                     {
-                        // Check for version byte - legacy format starts with player count (int32)
-                        // New format starts with version byte
-                        byte firstByte = reader.ReadByte();
+                        // Detect format version:
+                        // - Legacy format (v0): starts with int32 playerCount
+                        // - New format (v1+): starts with magic bytes 0x53 0x47 ("SG") then byte version
                         int playerCount;
                         byte version;
 
-                        if (firstByte == 1)
+                        byte firstByte = reader.ReadByte();
+                        byte secondByte = reader.ReadByte();
+
+                        if (firstByte == 0x53 && secondByte == 0x47) // "SG" magic
                         {
                             // New format with version
-                            version = firstByte;
+                            version = reader.ReadByte();
                             playerCount = reader.ReadInt32();
                         }
                         else
                         {
-                            // Legacy format - first byte is part of player count
-                            // Rewind and read as int32
+                            // Legacy format - rewind and read as int32 player count
                             ms.Position = 0;
                             playerCount = reader.ReadInt32();
                             version = 0;

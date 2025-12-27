@@ -12,7 +12,9 @@
       "Bash(python:*)",
       "Bash(pip install:*)",
       "WebFetch(domain:mods.vintagestory.at)",
-      "Bash(unzip:*)"
+      "Bash(unzip:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
     ]
   }
 }
