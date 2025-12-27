@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using System.Text;
 using HarmonyLib;
@@ -24,6 +25,9 @@ namespace SoulGear
         // Key used to store the keep inventory protection in player's WatchedAttributes
         public const string SOUL_PROTECTION_KEY = "soulGearProtection";
 
+        // Key used to store saved inventories in world save data
+        private const string SAVE_DATA_KEY = "soulGearSavedInventories";
+
         // Storage for saved inventories - keyed by player UID
         public static Dictionary<string, List<SavedInventory>> SavedInventories = new Dictionary<string, List<SavedInventory>>();
 
@@ -47,11 +51,50 @@ namespace SoulGear
             // Hook into player respawn event
             api.Event.PlayerRespawn += OnPlayerRespawn;
 
+            // Hook into world save event to persist saved inventories
+            api.Event.GameWorldSave += OnGameWorldSave;
+
             // Register a periodic check for players who were revived without respawning
             // (e.g., healed by poultice/bandage while downed)
             api.Event.RegisterGameTickListener(OnGameTick, 1000); // Check every second
 
+            // Load saved inventory data after the save game is fully loaded
+            // This ensures item references can be properly resolved
+            api.Event.SaveGameLoaded += LoadSavedInventories;
+
+            // Register chat command to check soul protection charges
+            api.ChatCommands.Create("soulcharges")
+                .WithDescription("Check how many Soul Gear protection charges you have")
+                .HandleWith(OnSoulChargesCommand);
+
             api.Logger.Notification("[SoulGear] Mod loaded with Harmony patches applied");
+        }
+
+        /// <summary>
+        /// Handler for the /soulcharges command.
+        /// </summary>
+        private TextCommandResult OnSoulChargesCommand(TextCommandCallingArgs args)
+        {
+            var player = args.Caller.Player;
+            if (player?.Entity == null)
+            {
+                return TextCommandResult.Error("Could not find player entity");
+            }
+
+            int charges = player.Entity.WatchedAttributes.GetInt(SOUL_PROTECTION_KEY, 0);
+
+            if (charges == 0)
+            {
+                return TextCommandResult.Success(Lang.Get("soulgear:message-no-charges"));
+            }
+            else if (charges == 1)
+            {
+                return TextCommandResult.Success(Lang.Get("soulgear:message-one-charge"));
+            }
+            else
+            {
+                return TextCommandResult.Success(Lang.Get("soulgear:message-multiple-charges", charges));
+            }
         }
 
         /// <summary>
@@ -148,6 +191,9 @@ namespace SoulGear
             }
 
             SavedInventories[playerUid] = inventoryList;
+
+            // Persist to world save immediately
+            PersistSavedInventories();
 
             ServerApi.Logger.Debug($"[SoulGear] Saved {inventoryList.Count} inventories for player {player.PlayerName}");
         }
@@ -249,6 +295,9 @@ namespace SoulGear
             // Remove the saved inventory data
             SavedInventories.Remove(playerUid);
 
+            // Persist the removal to world save
+            PersistSavedInventories();
+
             ServerApi.Logger.Debug($"[SoulGear] Restored {restoredCount} item stacks for player {player.PlayerName}");
 
             // Notify the player
@@ -262,6 +311,8 @@ namespace SoulGear
             if (ServerApi != null)
             {
                 ServerApi.Event.PlayerRespawn -= OnPlayerRespawn;
+                ServerApi.Event.GameWorldSave -= OnGameWorldSave;
+                ServerApi.Event.SaveGameLoaded -= LoadSavedInventories;
             }
 
             // Unpatch Harmony
@@ -269,6 +320,171 @@ namespace SoulGear
 
             SavedInventories.Clear();
             base.Dispose();
+        }
+
+        /// <summary>
+        /// Called when the world is saved. Persist saved inventories to world save data.
+        /// </summary>
+        private void OnGameWorldSave()
+        {
+            PersistSavedInventories();
+        }
+
+        /// <summary>
+        /// Persist the saved inventories to world save data.
+        /// </summary>
+        public static void PersistSavedInventories()
+        {
+            if (ServerApi == null) return;
+
+            if (SavedInventories.Count == 0)
+            {
+                // Clear any existing save data if no inventories to save
+                ServerApi.WorldManager.SaveGame.StoreData(SAVE_DATA_KEY, null);
+                return;
+            }
+
+            try
+            {
+                byte[] data;
+                using (var ms = new MemoryStream())
+                {
+                    using (var writer = new BinaryWriter(ms))
+                    {
+                        // Write number of players
+                        writer.Write(SavedInventories.Count);
+
+                        foreach (var kvp in SavedInventories)
+                        {
+                            // Write player UID
+                            writer.Write(kvp.Key);
+
+                            // Write number of inventories for this player
+                            writer.Write(kvp.Value.Count);
+
+                            foreach (var savedInv in kvp.Value)
+                            {
+                                // Write inventory info
+                                writer.Write(savedInv.InventoryClassName);
+                                writer.Write(savedInv.InventoryId);
+
+                                // Write number of slots
+                                writer.Write(savedInv.Slots.Count);
+
+                                foreach (var slot in savedInv.Slots)
+                                {
+                                    // Write slot index
+                                    writer.Write(slot.SlotIndex);
+
+                                    // Write ItemStack
+                                    slot.ItemStack.ToBytes(writer);
+                                }
+                            }
+                        }
+                    }
+                    data = ms.ToArray();
+                }
+
+                ServerApi.WorldManager.SaveGame.StoreData(SAVE_DATA_KEY, data);
+                ServerApi.Logger.Debug($"[SoulGear] Persisted {SavedInventories.Count} player inventories to world save");
+            }
+            catch (Exception ex)
+            {
+                ServerApi.Logger.Error($"[SoulGear] Failed to persist saved inventories: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Load saved inventories from world save data.
+        /// </summary>
+        private void LoadSavedInventories()
+        {
+            if (ServerApi == null) return;
+
+            try
+            {
+                byte[] data = ServerApi.WorldManager.SaveGame.GetData(SAVE_DATA_KEY);
+                if (data == null || data.Length == 0)
+                {
+                    ServerApi.Logger.Debug("[SoulGear] No saved inventory data found in world save");
+                    return;
+                }
+
+                SavedInventories.Clear();
+
+                using (var ms = new MemoryStream(data))
+                {
+                    using (var reader = new BinaryReader(ms))
+                    {
+                        // Read number of players
+                        int playerCount = reader.ReadInt32();
+
+                        for (int p = 0; p < playerCount; p++)
+                        {
+                            // Read player UID
+                            string playerUid = reader.ReadString();
+
+                            // Read number of inventories
+                            int invCount = reader.ReadInt32();
+
+                            var inventoryList = new List<SavedInventory>();
+
+                            for (int i = 0; i < invCount; i++)
+                            {
+                                // Read inventory info
+                                string invClassName = reader.ReadString();
+                                string invId = reader.ReadString();
+
+                                var savedInv = new SavedInventory
+                                {
+                                    InventoryClassName = invClassName,
+                                    InventoryId = invId,
+                                    Slots = new List<SavedSlot>()
+                                };
+
+                                // Read number of slots
+                                int slotCount = reader.ReadInt32();
+
+                                for (int s = 0; s < slotCount; s++)
+                                {
+                                    // Read slot index
+                                    int slotIndex = reader.ReadInt32();
+
+                                    // Read ItemStack
+                                    var itemStack = new ItemStack(reader);
+
+                                    // Resolve the item/block reference against the world's registry
+                                    itemStack.ResolveBlockOrItem(ServerApi.World);
+
+                                    // Only add if the item was successfully resolved
+                                    if (itemStack.Collectible != null)
+                                    {
+                                        savedInv.Slots.Add(new SavedSlot
+                                        {
+                                            SlotIndex = slotIndex,
+                                            ItemStack = itemStack
+                                        });
+                                    }
+                                    else
+                                    {
+                                        ServerApi.Logger.Warning($"[SoulGear] Could not resolve item in saved inventory, skipping slot {slotIndex}");
+                                    }
+                                }
+
+                                inventoryList.Add(savedInv);
+                            }
+
+                            SavedInventories[playerUid] = inventoryList;
+                        }
+                    }
+                }
+
+                ServerApi.Logger.Notification($"[SoulGear] Loaded {SavedInventories.Count} player inventories from world save");
+            }
+            catch (Exception ex)
+            {
+                ServerApi.Logger.Error($"[SoulGear] Failed to load saved inventories: {ex.Message}");
+            }
         }
     }
 
