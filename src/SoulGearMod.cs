@@ -417,6 +417,12 @@ namespace SoulGear
 
         public override void Dispose()
         {
+            // Persist any pending soul data before shutdown to prevent data loss
+            if (ServerApi != null && (pendingSave || !SavedInventories.IsEmpty))
+            {
+                PersistSavedInventories();
+            }
+
             if (ServerApi != null)
             {
                 ServerApi.Event.PlayerRespawn -= OnPlayerRespawn;

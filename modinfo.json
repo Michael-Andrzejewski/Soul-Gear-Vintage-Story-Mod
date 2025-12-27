@@ -4,7 +4,7 @@
   "name": "Soul Gear",
   "authors": ["Soareverix"],
   "description": "Adds the Soul Gear - a craftable item that grants one charge of keep inventory on death. Use it like a temporal gear, but instead of setting your spawn point, it protects your inventory for your next death.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "side": "Universal",
   "website": "https://github.com/Soareverix/Soul-Gear-Vintage-Story-Mod",
   "dependencies": {
