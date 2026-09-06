@@ -9,6 +9,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Common.Entities;
 using Vintagestory.API.Config;
+using Vintagestory.API.Datastructures;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
 using Vintagestory.API.Util;
@@ -42,8 +43,9 @@ namespace SoulGear
         // Flag to indicate pending save (debounce persistence)
         private static volatile bool pendingSave = false;
 
-        // Timeout for saved inventories of disconnected players (30 minutes)
-        private const long SAVED_INVENTORY_TIMEOUT_MS = 30 * 60 * 1000;
+        // Attribute keys Carry On uses for a carried block: the item stack lives in
+        // WatchedAttributes, the block entity data in (non-watched) Attributes.
+        public const string CARRYON_ATTR = "carryon:Carried";
 
         public override void Start(ICoreAPI api)
         {
@@ -130,14 +132,11 @@ namespace SoulGear
 
                 var player = ServerApi.World.PlayerByUid(playerUid) as IServerPlayer;
 
-                // Check for stale data from disconnected players
+                // Offline player: keep the data until they are back. Versions before
+                // 1.4.0 deleted it after 30 minutes of server uptime, so anyone who
+                // died with protection and logged off for the night lost everything.
                 if (player?.Entity == null)
                 {
-                    if (currentTime - data.SavedAtTime > SAVED_INVENTORY_TIMEOUT_MS)
-                    {
-                        keysToRemove.Add(playerUid);
-                        ServerApi.Logger.Warning($"[SoulGear] Removing stale inventory data for offline player {playerUid}");
-                    }
                     continue;
                 }
 
@@ -245,6 +244,58 @@ namespace SoulGear
         }
 
         /// <summary>
+        /// Move a Carry On carried block off the dying entity into the saved data.
+        /// No-op when nothing is carried or Carry On is not installed.
+        /// </summary>
+        public static void StashCarried(EntityPlayer entity)
+        {
+            if (entity?.Player == null) return;
+            if (!SavedInventories.TryGetValue(entity.Player.PlayerUID, out var data)) return;
+
+            var watched = entity.WatchedAttributes.GetTreeAttribute(CARRYON_ATTR);
+            var plain = entity.Attributes.GetTreeAttribute(CARRYON_ATTR);
+            if (watched == null && plain == null) return;
+
+            data.CarriedWatched = watched?.Clone() as ITreeAttribute;
+            data.CarriedData = plain?.Clone() as ITreeAttribute;
+            if (watched != null)
+            {
+                entity.WatchedAttributes.RemoveAttribute(CARRYON_ATTR);
+                entity.WatchedAttributes.MarkAllDirty();
+            }
+            if (plain != null) entity.Attributes.RemoveAttribute(CARRYON_ATTR);
+            pendingSave = true;
+            ServerApi?.Logger.Debug($"[SoulGear] Stashed Carry On block for {entity.Player.PlayerName}");
+        }
+
+        /// <summary>
+        /// Put a stashed Carry On block back on the player. Carry On reads the same
+        /// attribute tree, so the block reappears in their hands or on their back.
+        /// </summary>
+        private static void RestoreCarried(IServerPlayer player, SavedPlayerData data)
+        {
+            if (player?.Entity == null || data == null) return;
+            if (data.CarriedWatched == null && data.CarriedData == null) return;
+            try
+            {
+                if (data.CarriedWatched != null)
+                {
+                    player.Entity.WatchedAttributes.SetAttribute(CARRYON_ATTR, data.CarriedWatched.Clone());
+                    player.Entity.WatchedAttributes.MarkPathDirty(CARRYON_ATTR);
+                }
+                if (data.CarriedData != null)
+                {
+                    player.Entity.Attributes.SetAttribute(CARRYON_ATTR, data.CarriedData.Clone());
+                }
+                ServerApi?.Logger.Debug($"[SoulGear] Restored Carry On block for {player.PlayerName}");
+            }
+            catch (Exception ex)
+            {
+                ServerApi?.Logger.Warning($"[SoulGear] Could not restore Carry On block for {player.PlayerName}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Clear all items from the player's inventories so nothing drops.
         /// Called from Harmony patch before death.
         /// </summary>
@@ -344,8 +395,12 @@ namespace SoulGear
                     }
                 }
 
+                // A carried block alone also counts as something to give back.
+                bool hadCarried = playerData.CarriedWatched != null || playerData.CarriedData != null;
+                if (hadCarried) RestoreCarried(player, playerData);
+
                 // Only remove saved data if restoration was successful
-                if (restoredCount > 0)
+                if (restoredCount > 0 || (hadCarried && expectedCount == 0))
                 {
                     SavedInventories.TryRemove(playerUid, out _);
                     pendingSave = true;
@@ -482,7 +537,7 @@ namespace SoulGear
                             // Write magic bytes and version for future compatibility
                             writer.Write((byte)0x53); // 'S'
                             writer.Write((byte)0x47); // 'G'
-                            writer.Write((byte)1);    // Version 1
+                            writer.Write((byte)2);    // Version 2: v1 plus the Carry On trees per player
 
                             // Write number of players
                             writer.Write(snapshot.Length);
@@ -516,6 +571,10 @@ namespace SoulGear
                                         slot.ItemStack.ToBytes(writer);
                                     }
                                 }
+
+                                // v2: Carry On trees (watched stack tree, then block entity data)
+                                WriteTree(writer, kvp.Value.CarriedWatched);
+                                WriteTree(writer, kvp.Value.CarriedData);
                             }
                         }
                         data = ms.ToArray();
@@ -531,9 +590,23 @@ namespace SoulGear
             }
         }
 
+        private static void WriteTree(BinaryWriter writer, ITreeAttribute tree)
+        {
+            writer.Write(tree != null);
+            if (tree != null) tree.ToBytes(writer);
+        }
+
+        private static ITreeAttribute ReadTree(BinaryReader reader)
+        {
+            if (!reader.ReadBoolean()) return null;
+            var tree = new TreeAttribute();
+            tree.FromBytes(reader);
+            return tree;
+        }
+
         /// <summary>
         /// Load saved inventories from world save data.
-        /// Supports both legacy format (v0) and new format (v1).
+        /// Supports the legacy format (v0), v1, and v2 (v1 plus Carry On trees).
         /// </summary>
         private void LoadSavedInventories()
         {
@@ -638,10 +711,19 @@ namespace SoulGear
                                 inventoryList.Add(savedInv);
                             }
 
+                            ITreeAttribute carriedWatched = null, carriedData = null;
+                            if (version >= 2)
+                            {
+                                carriedWatched = ReadTree(reader);
+                                carriedData = ReadTree(reader);
+                            }
+
                             var playerData = new SavedPlayerData
                             {
                                 Inventories = inventoryList,
-                                SavedAtTime = savedAtTime
+                                SavedAtTime = savedAtTime,
+                                CarriedWatched = carriedWatched,
+                                CarriedData = carriedData
                             };
 
                             SavedInventories[playerUid] = playerData;
@@ -691,8 +773,18 @@ namespace SoulGear
                 // Save the inventory before death
                 SoulGearModSystem.SavePlayerInventory(serverPlayer);
 
+                // Carry On: a block carried in hands or on the back is not in any
+                // inventory. Carry On drops it in its own PlayerDeath handler, which
+                // fires later inside Die, so lift it off the entity now and give it
+                // back on respawn (dangerousb, Feb 2026).
+                SoulGearModSystem.StashCarried(__instance);
+
                 // Clear the inventory so nothing drops
                 SoulGearModSystem.ClearPlayerInventory(serverPlayer);
+
+                // Write to the world save right away. Until 1.4.0 this waited for the
+                // next autosave, so a crash right after a death lost the stash.
+                SoulGearModSystem.PersistSavedInventories();
 
                 // Remove one charge of protection
                 int newProtection = protection - 1;
@@ -742,6 +834,9 @@ namespace SoulGear
     {
         public List<SavedInventory> Inventories;
         public long SavedAtTime;
+        // Carry On carried block, if any: the watched stack tree and the block entity data tree.
+        public ITreeAttribute CarriedWatched;
+        public ITreeAttribute CarriedData;
     }
 
     /// <summary>
