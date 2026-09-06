@@ -36,6 +36,8 @@
       <PackageFiles Include="modinfo.json" />
     </ItemGroup>
     <!-- Copy DLL and modinfo.json -->
+    <!-- Wipe the staging folder first so a deleted or renamed asset never lingers in the zip -->
+    <RemoveDir Directories="$(ProjectDir)bin\$(Configuration)\$(TargetFramework)\mod\" />
     <Copy SourceFiles="@(PackageFiles)" DestinationFolder="$(ProjectDir)bin\$(Configuration)\$(TargetFramework)\mod\" />
     <!-- Copy assets folder recursively -->
     <ItemGroup>
